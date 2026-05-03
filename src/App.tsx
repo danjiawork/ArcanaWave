@@ -196,10 +196,13 @@ export default function App() {
           <TarotScene
             state={sceneState}
             drawnCards={drawnCards}
+            pendingCard={null}
+            scrollOffset={0}
             onCardDrawn={() => {}}
             tarotDeck={TAROT_DECK}
-            onCardHover={handleCardHover}
             isResetting={isResetting}
+            cardFronts={[]}
+            cardBacks={[]}
           />
         </Canvas>
       </div>
