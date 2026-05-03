@@ -57,10 +57,61 @@ const TAROT_DECK = [
 
 const POSITIONS = ["past", "present", "future"] as const;
 
+const CARD_NAMES = [
+  "00-the-fool", "01-the-magician", "02-the-high-priestess",
+  "03-the-empress", "04-the-emperor", "05-the-hierophant",
+  "06-the-lovers", "07-the-chariot", "08-strength",
+  "09-the-hermit", "10-wheel-of-fortune", "11-justice",
+  "12-the-hanged-man", "13-death", "14-temperance",
+  "15-the-devil", "16-the-tower", "17-the-star",
+  "18-the-moon", "19-the-sun", "20-judgement", "21-the-world"
+];
+
+function useCardTextures() {
+  const [fronts, setFronts] = useState<THREE.Texture[]>([]);
+  const [backs, setBacks] = useState<THREE.Texture[]>([]);
+
+  useEffect(() => {
+    const loader = new THREE.TextureLoader();
+    const loadAll = async () => {
+      const frontPromises = CARD_NAMES.map(
+        (name) => new Promise<THREE.Texture>((resolve, reject) => {
+          loader.load(`/cards/fronts/${name}.png`, resolve, undefined, reject);
+        })
+      );
+      const backPromises = Array.from({ length: 6 }, (_, i) =>
+        new Promise<THREE.Texture>((resolve, reject) => {
+          loader.load(`/cards/backs/back-${i + 1}.png`, resolve, undefined, reject);
+        })
+      );
+
+      const [loadedFronts, loadedBacks] = await Promise.all([
+        Promise.allSettled(frontPromises),
+        Promise.allSettled(backPromises),
+      ]);
+
+      setFronts(
+        loadedFronts
+          .filter((r): r is PromiseFulfilledResult<THREE.Texture> => r.status === "fulfilled")
+          .map((r) => r.value)
+      );
+      setBacks(
+        loadedBacks
+          .filter((r): r is PromiseFulfilledResult<THREE.Texture> => r.status === "fulfilled")
+          .map((r) => r.value)
+      );
+    };
+    loadAll();
+  }, []);
+
+  return { fronts, backs };
+}
+
 export default function App() {
   const { t, lang, setLang } = useTranslation();
   const oracle = useOracle();
   const { download: downloadShareImage } = useShareImage();
+  const cardTextures = useCardTextures();
 
   const [phase, setPhase] = useState<AppPhase>("LANDING");
   const [userQuestion, setUserQuestion] = useState("");
@@ -321,8 +372,8 @@ export default function App() {
               onCardDrawn={() => {}}
               tarotDeck={TAROT_DECK}
               isResetting={false}
-              cardFronts={[]}
-              cardBacks={[]}
+              cardFronts={cardTextures.fronts}
+              cardBacks={cardTextures.backs}
             />
           )}
         </Canvas>
