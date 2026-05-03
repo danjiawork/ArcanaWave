@@ -7,13 +7,26 @@ export type Gesture =
   | "WAVE"
   | "FIST"
   | "PRAY"
+  | "PINCH"
+  | "PALM_LIFT"
   | "UNKNOWN";
+
+export interface PalmState {
+  x: number;
+  y: number;
+  rotation: number;
+  visible: boolean;
+}
 
 export class HandTracker {
   private handLandmarker: HandLandmarker | null = null;
   private video: HTMLVideoElement | null = null;
   private isRunning = false;
   private wristHistory: { x: number; time: number }[] = [];
+  private palmState: PalmState = { x: 0.5, y: 0.5, rotation: 0, visible: false };
+  private prevPalmX = 0.5;
+  private prevRotation = 0;
+  private palmYHistory: { y: number; time: number }[] = [];
 
   async init() {
     const vision = await FilesetResolver.forVisionTasks(
@@ -52,6 +65,17 @@ export class HandTracker {
     }
   }
 
+  getPalmState(): PalmState {
+    return this.palmState;
+  }
+
+  getScrollDelta(): number {
+    if (!this.palmState.visible) return 0;
+    const xDelta = this.palmState.x - this.prevPalmX;
+    const rotDelta = this.palmState.rotation - this.prevRotation;
+    return Math.abs(xDelta) > Math.abs(rotDelta * 0.3) ? xDelta : rotDelta * 0.3;
+  }
+
   detectGesture(): Gesture {
     if (!this.handLandmarker || !this.video || !this.isRunning)
       return "UNKNOWN";
@@ -87,6 +111,21 @@ export class HandTracker {
       }
 
       const landmarks = results.landmarks[0];
+
+      // Update palm state
+      this.prevPalmX = this.palmState.x;
+      this.prevRotation = this.palmState.rotation;
+      this.palmState.x = landmarks[0].x;
+      this.palmState.y = landmarks[0].y;
+      this.palmState.visible = true;
+      const dx = landmarks[9].x - landmarks[0].x;
+      const dy = landmarks[9].y - landmarks[0].y;
+      this.palmState.rotation = Math.atan2(dx, -dy);
+
+      // Track vertical movement for PALM_LIFT detection
+      const now2 = performance.now();
+      this.palmYHistory.push({ y: landmarks[0].y, time: now2 });
+      this.palmYHistory = this.palmYHistory.filter((h) => now2 - h.time < 500);
 
       // A finger is considered extended if its tip is further from the wrist than its PIP joint,
       // AND further from its MCP joint than its PIP joint. This makes it rotation invariant.
@@ -154,7 +193,25 @@ export class HandTracker {
         }
       }
 
-      if (isOkGesture) {
+      // PINCH Gesture: Thumb and Index tips close, middle/ring/pinky partially curled
+      const isPinch = thumbIndexDist < 0.06 && !isMiddleUp && !isRingUp;
+
+      // PALM_LIFT: Open hand moving upward rapidly
+      let isPalmLift = false;
+      if (fingersUpCount >= 3 && this.palmYHistory.length > 5) {
+        const oldest = this.palmYHistory[0].y;
+        const newest = this.palmYHistory[this.palmYHistory.length - 1].y;
+        // In MediaPipe, y decreases going up
+        if (oldest - newest > 0.08) {
+          isPalmLift = true;
+        }
+      }
+
+      if (isPinch) {
+        return "PINCH";
+      } else if (isPalmLift) {
+        return "PALM_LIFT";
+      } else if (isOkGesture) {
         return "OK";
       } else if (isWaving) {
         return "WAVE";
@@ -167,6 +224,7 @@ export class HandTracker {
       }
     }
 
+    this.palmState.visible = false;
     return "UNKNOWN";
   }
 }
