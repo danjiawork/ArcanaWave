@@ -30,7 +30,7 @@ export class HandTracker {
 
   async init() {
     const vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.32/wasm"
     );
     this.handLandmarker = await HandLandmarker.createFromOptions(vision, {
       baseOptions: {
@@ -193,33 +193,36 @@ export class HandTracker {
         }
       }
 
-      // PINCH Gesture: Thumb and Index tips close, middle/ring/pinky partially curled
-      const isPinch = thumbIndexDist < 0.06 && !isMiddleUp && !isRingUp;
+      // PINCH Gesture: Thumb and Index tips close together, index reaching out (not curled like a fist)
+      const isIndexPartiallyExtended = dist(landmarks[8], landmarks[0]) > dist(landmarks[6], landmarks[0]);
+      const isPinch = thumbIndexDist < 0.08 && isIndexPartiallyExtended && !isMiddleUp;
 
-      // PALM_LIFT: Open hand moving upward rapidly
+      // PALM_LIFT: Open hand moving upward
       let isPalmLift = false;
       if (fingersUpCount >= 3 && this.palmYHistory.length > 5) {
         const oldest = this.palmYHistory[0].y;
         const newest = this.palmYHistory[this.palmYHistory.length - 1].y;
         // In MediaPipe, y decreases going up
-        if (oldest - newest > 0.08) {
+        if (oldest - newest > 0.06) {
           isPalmLift = true;
         }
       }
 
       if (isPinch) {
         return "PINCH";
+      } else if (isWaving) {
+        return "WAVE";
       } else if (isPalmLift) {
         return "PALM_LIFT";
       } else if (isOkGesture) {
         return "OK";
-      } else if (isWaving) {
-        return "WAVE";
+      } else if (fingersUpCount >= 3 && isThumbUp) {
+        return "OPEN_HAND";
       } else if (fingersUpCount >= 4) {
         return "OPEN_HAND";
       } else if (isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
         return "ONE_FINGER";
-      } else if (fingersUpCount === 0 && !isThumbUp) {
+      } else if (fingersUpCount <= 1 && !isIndexUp && !isMiddleUp) {
         return "FIST";
       }
     }

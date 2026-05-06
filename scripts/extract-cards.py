@@ -33,6 +33,55 @@ CARD_NAMES = [
 TARGET_WIDTH = 400
 TARGET_HEIGHT = 640
 
+
+def trim_card(img, threshold=235):
+    """Trim white borders from a card image by finding columns/rows
+    where >70% of pixels are near-white."""
+    import numpy as np
+    arr = np.array(img)
+    h, w = arr.shape[:2]
+
+    # A pixel is "white" if all channels > threshold
+    white_mask = arr.min(axis=2) > threshold
+
+    # For each column, what fraction of pixels are white?
+    col_white_frac = white_mask.mean(axis=0)
+    # For each row, what fraction are white?
+    row_white_frac = white_mask.mean(axis=1)
+
+    # Find left: scan from left, skip columns that are >70% white
+    left = 0
+    for x in range(w):
+        if col_white_frac[x] < 0.7:
+            left = x
+            break
+
+    # Find right: scan from right
+    right = w
+    for x in range(w - 1, -1, -1):
+        if col_white_frac[x] < 0.7:
+            right = x + 1
+            break
+
+    # Find top
+    top = 0
+    for y in range(h):
+        if row_white_frac[y] < 0.7:
+            top = y
+            break
+
+    # Find bottom
+    bottom = h
+    for y in range(h - 1, -1, -1):
+        if row_white_frac[y] < 0.7:
+            bottom = y + 1
+            break
+
+    if right <= left or bottom <= top:
+        return img
+    return img.crop((left, top, right, bottom))
+
+
 def extract_cards(pdf_path: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
@@ -48,17 +97,25 @@ def extract_cards(pdf_path: str, output_dir: str):
         img = Image.open(io.BytesIO(img_data))
 
         pw, ph = img.size
-        cols, rows = 2, 4
-        card_w = pw // cols
-        card_h = ph // rows
+        # 4 columns x 2 rows per page
+        cols, rows = 4, 2
+        cell_w = pw / cols
+        cell_h = ph / rows
 
         for row in range(rows):
             for col in range(cols):
                 if card_index >= 22:
                     break
-                x1 = col * card_w
-                y1 = row * card_h
-                card_img = img.crop((x1, y1, x1 + card_w, y1 + card_h))
+                # Large inset to guarantee no adjacent card bleed
+                inset_x = cell_w * 0.12
+                inset_y = cell_h * 0.04
+                x1 = int(col * cell_w + inset_x)
+                y1 = int(row * cell_h + inset_y)
+                x2 = int((col + 1) * cell_w - inset_x)
+                y2 = int((row + 1) * cell_h - inset_y)
+                card_img = img.crop((x1, y1, x2, y2))
+                # Trim any remaining white borders
+                card_img = trim_card(card_img)
                 card_img = card_img.resize((TARGET_WIDTH, TARGET_HEIGHT), Image.LANCZOS)
                 filename = f"{CARD_NAMES[card_index]}.png"
                 card_img.save(os.path.join(output_dir, filename))

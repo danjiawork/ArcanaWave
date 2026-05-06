@@ -10,6 +10,9 @@ export default defineConfig(({mode}) => {
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.VITE_AI_PROVIDER': JSON.stringify(env.VITE_AI_PROVIDER),
+      'process.env.ANTHROPIC_API_KEY': JSON.stringify(env.ANTHROPIC_API_KEY),
+      'process.env.ANTHROPIC_BASE_URL': JSON.stringify(env.ANTHROPIC_BASE_URL),
+      'process.env.CLAUDE_MODEL': JSON.stringify(env.CLAUDE_MODEL),
     },
     resolve: {
       alias: {
@@ -17,9 +20,14 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
+        '/api/claude': {
+          target: env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/claude/, ''),
+        },
+      },
     },
   };
 });

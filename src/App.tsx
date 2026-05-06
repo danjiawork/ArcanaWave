@@ -79,7 +79,7 @@ function useCardTextures() {
           loader.load(`/cards/fronts/${name}.png`, resolve, undefined, reject);
         })
       );
-      const backPromises = Array.from({ length: 6 }, (_, i) =>
+      const backPromises = Array.from({ length: 8 }, (_, i) =>
         new Promise<THREE.Texture>((resolve, reject) => {
           loader.load(`/cards/backs/back-${i + 1}.png`, resolve, undefined, reject);
         })
@@ -119,7 +119,6 @@ export default function App() {
   const [pendingCard, setPendingCard] = useState<number | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [currentGesture, setCurrentGesture] = useState<Gesture>("UNKNOWN");
-  const [instruction, setInstruction] = useState("");
   const [showGuide, setShowGuide] = useState(false);
   const [isFirstFan, setIsFirstFan] = useState(true);
   const [handX, setHandX] = useState<number | undefined>(undefined);
@@ -129,14 +128,19 @@ export default function App() {
   const requestRef = useRef<number>(0);
   const lastGestureRef = useRef<Gesture>("UNKNOWN");
   const gestureHoldTimeRef = useRef<number>(0);
+  const gestureGraceRef = useRef<number>(0);
+  const lastTriggeredGestureRef = useRef<Gesture>("UNKNOWN");
+  const revealSwipeRef = useRef<number>(0);
   const stuckTimerRef = useRef<number>(0);
 
   const phaseRef = useRef(phase);
   const drawnCardsRef = useRef(drawnCards);
   const pendingCardRef = useRef(pendingCard);
+  const scrollOffsetRef = useRef(scrollOffset);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { drawnCardsRef.current = drawnCards; }, [drawnCards]);
   useEffect(() => { pendingCardRef.current = pendingCard; }, [pendingCard]);
+  useEffect(() => { scrollOffsetRef.current = scrollOffset; }, [scrollOffset]);
 
   const sceneState: SceneState = useMemo(() => {
     switch (phase) {
@@ -160,6 +164,18 @@ export default function App() {
     }
   }, [phase]);
 
+  const instruction = useMemo(() => {
+    switch (phase) {
+      case "CEREMONY_INIT": return t("ceremony.init_camera");
+      case "CEREMONY_FIST": return t("ceremony.fist_prompt");
+      case "CEREMONY_PALM": return t("ceremony.open_palm");
+      case "FAN": return t("fan.guide");
+      case "PENDING": return t("draw.pending");
+      case "WAITING_REVEAL": return t("reveal.prompt");
+      default: return "";
+    }
+  }, [phase, t]);
+
   const handleStart = () => {
     soundManager.init();
     setPhase("QUESTION");
@@ -168,7 +184,6 @@ export default function App() {
   const handleQuestionReady = async (question: string) => {
     setUserQuestion(question);
     setPhase("CEREMONY_INIT");
-    setInstruction(t("ceremony.init_camera"));
 
     const tracker = new HandTracker();
     await tracker.init();
@@ -176,7 +191,6 @@ export default function App() {
       await tracker.startCamera(videoRef.current);
       trackerRef.current = tracker;
       setPhase("CEREMONY_FIST");
-      setInstruction(t("ceremony.fist_prompt"));
       startDetectionLoop(tracker);
     }
   };
@@ -191,10 +205,25 @@ export default function App() {
         setHandX(palmState.x);
       }
 
-      if (phaseRef.current === "FAN") {
-        const delta = tracker.getScrollDelta();
-        if (Math.abs(delta) > 0.002) {
-          setScrollOffset((prev) => Math.max(-1, Math.min(1, prev + delta * 2)));
+      if (phaseRef.current === "FAN" && palmState.visible) {
+        // Hybrid: rotation (twist) + position-based joystick
+        const rotDelta = tracker.getScrollDelta();
+        // Position joystick: inverted because camera mirrors
+        const palmCenter = 0.5 - palmState.x;
+        const deadZone = 0.1;
+        let speed = 0;
+
+        // Rotation/movement delta takes priority
+        if (Math.abs(rotDelta) > 0.003) {
+          speed = -rotDelta * 1.5;
+        }
+        // Position-based joystick as supplement
+        else if (Math.abs(palmCenter) > deadZone) {
+          speed = (palmCenter - Math.sign(palmCenter) * deadZone) * 0.02;
+        }
+
+        if (Math.abs(speed) > 0.0001) {
+          setScrollOffset((prev) => Math.max(-1, Math.min(1, prev + speed)));
           stuckTimerRef.current = 0;
         } else {
           stuckTimerRef.current += 16;
@@ -205,15 +234,43 @@ export default function App() {
         }
       }
 
+      // WAITING_REVEAL: detect horizontal swipe to trigger reveal
+      if (phaseRef.current === "WAITING_REVEAL" && palmState.visible) {
+        const delta = tracker.getScrollDelta();
+        if (Math.abs(delta) > 0.01) {
+          revealSwipeRef.current += Math.abs(delta);
+          if (revealSwipeRef.current > 0.08) {
+            soundManager.playReveal();
+            setPhase("REVEAL");
+            revealSwipeRef.current = 0;
+            lastTriggeredGestureRef.current = lastGestureRef.current;
+          }
+        }
+      }
+
+      // Edge-triggered gesture: fires ONCE per gesture transition
+      // Must change to a different gesture before the same one can trigger again
       if (gesture === lastGestureRef.current && gesture !== "UNKNOWN") {
         gestureHoldTimeRef.current += 16;
-      } else {
+        gestureGraceRef.current = 0;
+      } else if (gesture === "UNKNOWN" && lastGestureRef.current !== "UNKNOWN") {
+        gestureGraceRef.current += 16;
+        if (gestureGraceRef.current > 150) {
+          gestureHoldTimeRef.current = 0;
+          lastGestureRef.current = gesture;
+          gestureGraceRef.current = 0;
+          lastTriggeredGestureRef.current = "UNKNOWN";
+        }
+      } else if (gesture !== lastGestureRef.current) {
         gestureHoldTimeRef.current = 0;
+        gestureGraceRef.current = 0;
         lastGestureRef.current = gesture;
       }
 
-      if (gestureHoldTimeRef.current > 300) {
-        handleGesture(gesture);
+      // Trigger only if: held 400ms AND this gesture hasn't already triggered
+      if (gestureHoldTimeRef.current > 400 && lastGestureRef.current !== lastTriggeredGestureRef.current) {
+        handleGesture(lastGestureRef.current);
+        lastTriggeredGestureRef.current = lastGestureRef.current;
         gestureHoldTimeRef.current = 0;
       }
 
@@ -230,7 +287,6 @@ export default function App() {
         if (gesture === "FIST") {
           soundManager.playFan();
           setPhase("CEREMONY_PALM");
-          setInstruction(t("ceremony.open_palm"));
         }
         break;
 
@@ -238,7 +294,6 @@ export default function App() {
         if (gesture === "OPEN_HAND") {
           soundManager.playFan();
           setPhase("FAN");
-          setInstruction(t("fan.guide"));
           if (isFirstFan) {
             setShowGuide(true);
             setIsFirstFan(false);
@@ -249,19 +304,18 @@ export default function App() {
         break;
 
       case "FAN":
-        if (gesture === "PALM_LIFT") {
-          const centerIndex = Math.round((scrollOffset + 1) * 10.5);
+        if (gesture === "FIST") {
+          const centerIndex = Math.round((scrollOffsetRef.current + 1) * 10.5);
           const cardIndex = Math.max(0, Math.min(21, centerIndex));
           if (!drawnCardsRef.current.includes(cardIndex)) {
             setPendingCard(cardIndex);
             setPhase("PENDING");
-            setInstruction(t("draw.pending"));
           }
         }
         break;
 
       case "PENDING":
-        if (gesture === "PINCH" && pendingCardRef.current !== null) {
+        if ((gesture === "PINCH" || gesture === "FIST") && pendingCardRef.current !== null) {
           soundManager.playDraw();
           const newDrawn = [...drawnCardsRef.current, pendingCardRef.current];
           setDrawnCards(newDrawn);
@@ -269,45 +323,17 @@ export default function App() {
 
           if (newDrawn.length >= 3) {
             setPhase("WAITING_REVEAL");
-            setInstruction(t("reveal.prompt"));
           } else {
             setPhase("FAN");
-            setInstruction(t("fan.guide"));
+            // Auto-shift scroll to next available card
+            setScrollOffset((prev) => {
+              const shift = prev + 0.1;
+              return Math.max(-1, Math.min(1, shift));
+            });
           }
         } else if (gesture === "OPEN_HAND") {
           setPendingCard(null);
           setPhase("FAN");
-          setInstruction(t("fan.guide"));
-        }
-        break;
-
-      case "WAITING_REVEAL":
-        if (gesture === "WAVE") {
-          soundManager.playReveal();
-          setPhase("REVEAL");
-          setTimeout(() => {
-            setPhase("ORACLE");
-            const positions = [
-              t("positions.past"),
-              t("positions.present"),
-              t("positions.future"),
-            ];
-            oracle.startReading({
-              cards: drawnCardsRef.current.map((id, i) => ({
-                name: lang === "zh" ? TAROT_DECK[id].name : TAROT_DECK[id].nameEn,
-                meaning: lang === "zh" ? TAROT_DECK[id].meaning : TAROT_DECK[id].meaningEn,
-                position: positions[i],
-              })),
-              question: userQuestion,
-              language: lang,
-            });
-          }, 2000);
-        }
-        break;
-
-      case "ORACLE":
-        if (gesture === "FIST") {
-          handleRestart();
         }
         break;
     }
@@ -320,7 +346,6 @@ export default function App() {
     setPendingCard(null);
     setScrollOffset(0);
     setUserQuestion("");
-    setInstruction("");
     setShowGuide(false);
   };
 
@@ -346,6 +371,29 @@ export default function App() {
       if (trackerRef.current) trackerRef.current.stopCamera();
     };
   }, []);
+
+  // Transition from REVEAL to ORACLE after 2s delay
+  useEffect(() => {
+    if (phase !== "REVEAL") return;
+    const timer = setTimeout(() => {
+      setPhase("ORACLE");
+      const positions = [
+        t("positions.past"),
+        t("positions.present"),
+        t("positions.future"),
+      ];
+      oracle.startReading({
+        cards: drawnCards.map((id, i) => ({
+          name: lang === "zh" ? TAROT_DECK[id].name : TAROT_DECK[id].nameEn,
+          meaning: lang === "zh" ? TAROT_DECK[id].meaning : TAROT_DECK[id].meaningEn,
+          position: positions[i],
+        })),
+        question: userQuestion,
+        language: lang,
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   useEffect(() => {
     if (localStorage.getItem("arcanawave-guide-shown")) {
@@ -423,6 +471,13 @@ export default function App() {
         </div>
       )}
 
+      {/* Gesture debug indicator */}
+      {["CEREMONY_FIST", "CEREMONY_PALM", "FAN", "PENDING", "WAITING_REVEAL"].includes(phase) && (
+        <div className="fixed bottom-4 left-4 z-50 px-3 py-1.5 rounded bg-black/70 text-xs text-green-400 font-mono">
+          Gesture: {currentGesture} | Phase: {phase}
+        </div>
+      )}
+
       {/* Gesture guide */}
       <GestureGuide
         show={showGuide && phase === "FAN"}
@@ -430,8 +485,8 @@ export default function App() {
         isFirstTime={isFirstFan}
       />
 
-      {/* Hidden video */}
-      <video ref={videoRef} className="hidden" playsInline muted />
+      {/* Camera preview (debug) */}
+      <video ref={videoRef} className="fixed top-16 left-4 z-50 w-40 h-30 rounded border border-amber-500/30 opacity-80" playsInline muted />
     </div>
   );
 }

@@ -82,10 +82,14 @@ export function TarotScene({
       const startAngle = Math.PI / 2 + spreadAngle / 2;
       const scrollShift = scrollOffset * spreadAngle * 0.4;
 
+      const centerIndex = Math.round((scrollOffset + 1) * 10.5);
+      const clampedCenter = Math.max(0, Math.min(21, centerIndex));
+
       cards.forEach((card, i) => {
         const isDrawn = drawnCards.includes(card.id);
         const drawnIndex = drawnCards.indexOf(card.id);
         const isPending = pendingCard === card.id;
+        const isCenter = card.id === clampedCenter && !isDrawn && !isPending;
 
         if (isDrawn) {
           const xOffset = (drawnIndex - 1) * 2;
@@ -101,9 +105,11 @@ export function TarotScene({
           const radius = 5.5;
           const x = Math.cos(angle) * radius;
           const y = Math.sin(angle) * radius - radius - 2.5;
-          targetPositions.current[i].set(x, y, i * 0.01);
+          const zOffset = isCenter ? 0.5 : i * 0.01;
+          const scale = isCenter ? 1.15 : 0.9;
+          targetPositions.current[i].set(x, y, zOffset);
           targetRotations.current[i].set(0, 0, angle - Math.PI / 2);
-          targetScales.current[i].set(0.9, 0.9, 0.9);
+          targetScales.current[i].set(scale, scale, scale);
         }
       });
     } else if (state === "WAITING_REVEAL") {
@@ -155,11 +161,17 @@ export function TarotScene({
     });
   });
 
+  const centerCardIndex = useMemo(() => {
+    const idx = Math.round((scrollOffset + 1) * 10.5);
+    return Math.max(0, Math.min(21, idx));
+  }, [scrollOffset]);
+
   return (
     <group ref={groupRef}>
       {cards.map((card, i) => {
         const isDrawn = drawnCards.includes(card.id);
         const isPending = pendingCard === card.id;
+        const isCenter = card.id === centerCardIndex && !isDrawn && !isPending && (state === "FAN" || state === "PENDING");
         const backTexture = cardBacks.length > 0 ? cardBacks[i % cardBacks.length] : null;
         const frontTexture = cardFronts.length > i ? cardFronts[i] : null;
 
@@ -237,6 +249,19 @@ export function TarotScene({
                   {card.meaning}
                 </Text>
               </>
+            )}
+
+            {/* Glow ring for center (highlighted) card */}
+            {isCenter && (
+              <mesh position={[0, 0, -0.02]}>
+                <ringGeometry args={[0.65, 0.75, 32]} />
+                <meshBasicMaterial
+                  color="#d4af37"
+                  transparent
+                  opacity={0.5}
+                  blending={THREE.AdditiveBlending}
+                />
+              </mesh>
             )}
 
             {/* Glow ring for pending card */}

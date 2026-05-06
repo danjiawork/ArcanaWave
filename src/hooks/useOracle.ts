@@ -39,19 +39,34 @@ async function streamClaude(
   onChunk: (text: string) => void,
   abortSignal: AbortSignal
 ): Promise<void> {
-  const apiKey = import.meta.env.VITE_CLAUDE_API_KEY;
-  if (!apiKey) throw new Error("VITE_CLAUDE_API_KEY not set in .env.local");
+  const apiKey =
+    import.meta.env.VITE_CLAUDE_API_KEY ||
+    (globalThis as any).process?.env?.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("No Anthropic API key set in .env.local");
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const baseUrl =
+    (globalThis as any).process?.env?.ANTHROPIC_BASE_URL ||
+    "https://api.anthropic.com";
+  const model =
+    (globalThis as any).process?.env?.CLAUDE_MODEL || "claude-sonnet-4-6";
+
+  // Use Vite proxy in dev to avoid CORS; direct URL in production
+  const url = baseUrl.includes("localhost")
+    ? "/api/claude/v1/messages"
+    : baseUrl.replace(/\/$/, "") + "/v1/messages";
+
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
+      ...(baseUrl.includes("anthropic.com")
+        ? { "anthropic-dangerous-direct-browser-access": "true" }
+        : {}),
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model,
       max_tokens: 1024,
       system: [
         {
