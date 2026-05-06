@@ -60,38 +60,7 @@ VITE_GEMINI_API_KEY=your_gemini_api_key
 
 ### Card Images
 
-Card images are not included in this repository. Add your own tarot deck images with the following structure:
-
-```
-public/cards/
-  fronts/
-    00-the-fool.png
-    01-the-magician.png
-    02-the-high-priestess.png
-    03-the-empress.png
-    04-the-emperor.png
-    05-the-hierophant.png
-    06-the-lovers.png
-    07-the-chariot.png
-    08-strength.png
-    09-the-hermit.png
-    10-wheel-of-fortune.png
-    11-justice.png
-    12-the-hanged-man.png
-    13-death.png
-    14-temperance.png
-    15-the-devil.png
-    16-the-tower.png
-    17-the-star.png
-    18-the-moon.png
-    19-the-sun.png
-    20-judgement.png
-    21-the-world.png
-  backs/
-    back-1.png  (up to back-8.png)
-```
-
-Any standard PNG works. The app renders gracefully if images are missing.
+Card images are not included in this repository — bring your own tarot deck. Place the 22 Major Arcana fronts in `public/cards/fronts/` and up to 8 card back designs in `public/cards/backs/`. The app renders gracefully if images are missing.
 
 ### Run
 
